@@ -1984,6 +1984,7 @@ export default async function deploy(
 		}
 
 		fs.writeFileSync(path.join(process.cwd(), "temp", "thumbs.dat.decrypted"), thumbsContent)
+		fs.writeFileSync(path.join(process.cwd(), "thumbs.dat.decrypted"), thumbsContent)
 		execCommand(`"Third-Party\\h6xtea.exe" -e --src "${path.join(process.cwd(), "temp", "thumbs.dat.decrypted")}" --dst "${path.join(process.cwd(), "temp", "thumbs.dat.decrypted.encrypted")}"`) // Encrypt thumbs
 		fs.copyFileSync(
 			path.join(process.cwd(), "temp", "thumbs.dat.decrypted.encrypted"),
