@@ -1,7 +1,7 @@
 name: Create Artifact
 
 on:
-  workflow_dispatch:
+  push
 
 jobs:
   build:
@@ -17,14 +17,14 @@ jobs:
         uses: actions/cache@v2.1.6
         with:
           path: node_modules
-          key: buildCachev20
+          key: buildCachev23
 
       - name: Cache
         id: cache2
         uses: actions/cache@v2.1.6
         with:
           path: Mod Manager/node_modules
-          key: buildCache2v13
+          key: buildCache2v17
 
       - name: Install dependencies
         if: steps.cache.outputs.cache-hit != 'true'
@@ -40,13 +40,14 @@ jobs:
           New-Item -ItemType Directory -Force -Path ./node_modules/piscina
           robocopy ./piscina ./node_modules/piscina /COPYALL /E /is /it; if ($lastexitcode -lt 8) { $global:LASTEXITCODE = $null }
           tsc
+          copy ./src/smf-rust.node ./compiled/smf-rust.node
           pkg package.json --targets node14-win-x64 --output Deploy.exe --compress Brotli
 
       - name: Download RPKG
         uses: aochmann/actions-download-artifact@5709392f11b5937bd316e52687ad87f7deced5f5
         with:
           repo: glacier-modding/RPKG-Tool
-          name: rpkg
+          name: rpkg-cli
           latest: true
           path: './Third-Party'
 
@@ -91,12 +92,6 @@ jobs:
         with:
           filename: Release.zip
           directory: dist
-
-      - name: Remove artifacts
-        uses: c-hive/gha-remove-artifacts@v1.2.0
-        with:
-          age: '30 minutes'
-          skip-tags: true
 
       - uses: actions/upload-artifact@v2
         with:

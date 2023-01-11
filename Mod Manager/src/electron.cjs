@@ -111,10 +111,42 @@ ipcMain.on("deploy", () => {
 })
 
 ipcMain.on("modFileOpenDialog", () => {
-	mainWindow.webContents.send("modFileOpenDialogResult", dialog.showOpenDialogSync({
-		title: "Add a mod file",
-		buttonLabel: "Select",
-		filters: [{ name: "Mod Files", extensions: ["zip", "rpkg"] }],
-		properties: ["openFile", "dontAddToRecent"]
-	}))
+	mainWindow.webContents.send(
+		"modFileOpenDialogResult",
+		dialog.showOpenDialogSync({
+			title: "Add a mod file",
+			buttonLabel: "Select",
+			filters: [{ name: "Mod Files", extensions: ["zip", "rpkg"] }],
+			properties: ["openFile", "dontAddToRecent"]
+		})
+	)
+})
+
+ipcMain.on("runtimePackageOpenDialog", () => {
+	mainWindow.webContents.send(
+		"runtimePackageOpenDialogResult",
+		dialog.showOpenDialogSync({
+			title: "Select an RPKG file",
+			buttonLabel: "Select",
+			filters: [{ name: "RPKG Files", extensions: ["rpkg"] }],
+			properties: ["openFile", "dontAddToRecent"]
+		})
+	)
+})
+
+ipcMain.on("imageOpenDialog", () => {
+	mainWindow.webContents.send(
+		"imageOpenDialogResult",
+		dialog.showOpenDialogSync({
+			title: "Select an image",
+			buttonLabel: "Select",
+			filters: [{ name: "Image Files", extensions: ["png", "jpg", "apng", "gif", "webp", "svg", "jpeg", "jfif"] }],
+			properties: ["openFile", "dontAddToRecent"]
+		})
+	)
+})
+
+ipcMain.on("relaunchApp", () => {
+	app.relaunch()
+	app.exit()
 })

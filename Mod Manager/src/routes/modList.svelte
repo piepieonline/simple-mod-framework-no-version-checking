@@ -3,7 +3,8 @@
 	import { flip } from "svelte/animate"
 
 	import SortableList from "svelte-sortable-list"
-	import { Button, CodeSnippet, Modal } from "carbon-components-svelte"
+	import json5 from "json5"
+	import { Button, InlineNotification, Modal } from "carbon-components-svelte"
 
 	import { getAllMods, getConfig, mergeConfig, getManifestFromModID, modIsFramework, getModFolder, sortMods } from "$lib/utils"
 	import Mod from "$lib/Mod.svelte"
@@ -17,6 +18,7 @@
 	import Settings from "carbon-icons-svelte/lib/Settings.svelte"
 	import TrashCan from "carbon-icons-svelte/lib/TrashCan.svelte"
 	import Close from "carbon-icons-svelte/lib/Close.svelte"
+	import { OptionType } from "../../../src/types"
 
 	let enabledMods: { value: string }[] = [],
 		disabledMods: { value: string }[] = []
@@ -43,32 +45,28 @@
 	let deployOutput = ""
 	let deployFinished = false
 
-	async function startDeploy() {
-		window.ipc.send("deploy")
+	window.ipc.receive("frameworkDeployModalOpen", () => {
+		frameworkDeployModalOpen = true
+	})
 
-		window.ipc.receive("frameworkDeployModalOpen", () => {
-			frameworkDeployModalOpen = true
-		})
+	window.ipc.receive("frameworkDeployOutput", (output: string) => {
+		deployOutput = output
+		setTimeout(() => {
+			document.getElementById("deployOutputCodeElement")?.scrollIntoView({
+				behavior: "smooth",
+				block: "end"
+			})
+		}, 100)
+	})
 
-		window.ipc.receive("frameworkDeployOutput", (output: string) => {
-			deployOutput = output
-			setTimeout(() => {
-				document.getElementById("deployOutputCodeElement")?.scrollIntoView({
-					behavior: "smooth",
-					block: "end"
-				})
-			}, 100)
-		})
+	window.ipc.receive("frameworkDeployFinished", () => {
+		deployFinished = true
+	})
 
-		window.ipc.receive("frameworkDeployFinished", () => {
-			deployFinished = true
-		})
-	}
-
-	let modNameInputModal
+	let modNameInputModal: TextInputModal
 	let modNameInputModalOpen = false
 
-	let modChunkInputModal
+	let modChunkInputModal: TextInputModal
 	let modChunkInputModalOpen = false
 
 	let rpkgModExtractionInProgress = false
@@ -80,6 +78,8 @@
 
 	let rpkgModName: string
 	let rpkgModChunk: string
+
+	let frameworkModScriptsWarningOpen = false
 
 	async function addMod() {
 		window.ipc.send("modFileOpenDialog")
@@ -106,19 +106,33 @@
 
 					frameworkModExtractionInProgress = true
 
-					if (window.klaw("./staging", { depthLimit: 0 }).some((a) => a.stats.size)) {
+					if (window.klaw("./staging", { depthLimit: 0, nodir: true }).length) {
 						frameworkModExtractionInProgress = false
 						invalidFrameworkZipModalOpen = true
 						return
 					}
 
-					window.fs.copySync("./staging", "../Mods")
+					if (
+						window.fs
+							.readdirSync("./staging")
+							.some(
+								(a) =>
+									json5.parse(window.fs.readFileSync(window.path.join("./staging", a, "manifest.json"), "utf8")).scripts ||
+									json5.parse(window.fs.readFileSync(window.path.join("./staging", a, "manifest.json"), "utf8")).options?.some((b) => b.scripts)
+							)
+					) {
+						frameworkModExtractionInProgress = false
 
-					window.fs.removeSync("./staging")
+						frameworkModScriptsWarningOpen = true
+					} else {
+						window.fs.copySync("./staging", "../Mods")
 
-					window.location.reload()
+						window.fs.removeSync("./staging")
 
-					frameworkModExtractionInProgress = false
+						window.location.reload()
+
+						frameworkModExtractionInProgress = false
+					}
 				}
 			}
 		})
@@ -135,6 +149,19 @@
 		window.location.reload()
 
 		rpkgModExtractionInProgress = false
+	}
+
+	let displayZonedModsDialog = false
+	const zonedMods: string[] = []
+
+	for (const mod of getAllMods().filter((a) => modIsFramework(a))) {
+		const modFolder = getModFolder(mod)
+
+		if (window.originalFs.existsSync(window.path.join(modFolder, "manifest.json:Zone.Identifier"))) {
+			zonedMods.push(getManifestFromModID(mod).name)
+			displayZonedModsDialog = true
+			window.originalFs.unlinkSync(window.path.join(modFolder, "manifest.json:Zone.Identifier")) // Will prevent the message from being shown again for the same mod
+		}
 	}
 </script>
 
@@ -193,14 +220,16 @@
 	</div>
 	<div class="w-full">
 		<div class="flex gap-4 items-center justify-center" transition:scale>
-			<h1 class="flex-grow">{changed ? "To Be Applied" : "Enabled Mods"}</h1>
+			<h1 class="flex-grow">{changed && !deployFinished ? "To Be Applied" : "Enabled Mods"}</h1>
 			<Button
 				kind="primary"
-				style={changed ? "background-color: green" : ""}
+				style={changed && !deployFinished ? "background-color: green" : ""}
 				icon={Rocket}
 				on:click={() => {
 					if (sortMods()) {
-						startDeploy()
+						deployOutput = ""
+						deployFinished = false
+						window.ipc.send("deploy")
 					} else {
 						dependencyCycleModalOpen = true
 					}
@@ -229,7 +258,7 @@
 						manifest={modIsFramework(item.value) ? getManifestFromModID(item.value) : undefined}
 						rpkgModName={!modIsFramework(item.value) ? item.value : undefined}
 					>
-						{#if modIsFramework(item.value) && getManifestFromModID(item.value)?.options?.length}
+						{#if modIsFramework(item.value) && getManifestFromModID(item.value)?.options?.filter((a) => a.type != OptionType.conditional)?.length}
 							<Button
 								kind="ghost"
 								icon={Settings}
@@ -288,16 +317,30 @@
 <Modal passiveModal open={frameworkDeployModalOpen} modalHeading="Applying your mods" preventCloseOnClickOutside>
 	Your mods are being deployed. This may take a while - grab a coffee or something.
 	<br />
-	<pre class="mt-2 h-[10vh] overflow-y-auto whitespace-pre-wrap">
-		<code id="deployOutputCodeElement">{deployOutput}</code>
-	</pre>
+	<pre class="mt-2 h-[10vh] overflow-y-auto whitespace-pre-wrap"><code id="deployOutputCodeElement">{deployOutput}</code></pre>
+	{#if deployOutput.split("\n").some((a) => a.startsWith("WARN")) || deployOutput.split("\n").some((a) => a.startsWith("ERROR"))}
+		<br />
+		<div class="flex flex-row gap-2 flex-wrap max-h-[15vh] overflow-y-auto">
+			{#each deployOutput.split("\n").filter((a) => a.startsWith("WARN") || a.startsWith("ERROR")) as line}
+				<InlineNotification hideCloseButton lowContrast kind={line.startsWith("WARN") ? "warning" : "error"}>
+					<div slot="title" class="-mt-1 text-lg">
+						{line.startsWith("WARN") ? "Warning" : "Error"}
+					</div>
+					<div slot="subtitle">{line.replace("WARN ", "").replace("ERROR ", "")}</div>
+				</InlineNotification>
+			{/each}
+		</div>
+	{/if}
 
 	{#if deployFinished}
 		<br />
 		<div class="flex gap-4 items-center">
-			{#if deployOutput.includes("Deployed all mods successfully.")}
+			{#if deployOutput.includes("Deployed all mods successfully.") && !deployOutput.split("\n").some((a) => a.startsWith("WARN"))}
 				<Button kind="primary" icon={Close} on:click={() => (frameworkDeployModalOpen = false)}>Close</Button>
 				<span class="text-green-300">Deploy successful</span>
+			{:else if deployOutput.includes("Deployed all mods successfully.") && deployOutput.split("\n").some((a) => a.startsWith("WARN"))}
+				<Button kind="primary" icon={Close} on:click={() => (frameworkDeployModalOpen = false)}>Close</Button>
+				<span class="text-yellow-300">Potential issues in deployment</span>
 			{:else}
 				<Button kind="primary" icon={Close} on:click={() => (frameworkDeployModalOpen = false)}>Close</Button>
 				<span class="text-red-300">Deploy unsuccessful</span>
@@ -315,7 +358,7 @@
 		rpkgModName = modNameInputModal.value
 
 		try {
-			var result = [...modFilePath.matchAll(/(chunk[0-9]*(?:patch[0-9]*)?)\.rpkg/g)]
+			var result = [...modFilePath.matchAll(/(chunk[0-9]*(?:patch.*)?)\.rpkg/g)]
 			result = [...result[result.length - 1][result[result.length - 1].length - 1].matchAll(/(chunk[0-9]*)/g)]
 			rpkgModChunk = result[result.length - 1][result[result.length - 1].length - 1]
 
@@ -333,7 +376,7 @@
 <TextInputModal
 	bind:this={modChunkInputModal}
 	showingModal={modChunkInputModalOpen}
-	modalText="Mod chunk (if it advises you to name it chunk0patch2, for example, then it's chunk0)"
+	modalText="Mod chunk (if it advises you to name it chunk0patch3 or the file is named chunk0patchX, for example, then it's chunk0)"
 	modalPlaceholder="chunk0"
 	on:close={() => {
 		rpkgModChunk = modChunkInputModal.value
@@ -348,6 +391,37 @@
 
 <Modal alert bind:open={invalidFrameworkZipModalOpen} modalHeading="Invalid framework ZIP" primaryButtonText="OK" shouldSubmitOnEnter={false}>
 	<p>The framework ZIP file contains files in the root directory. Contact the mod author.</p>
+</Modal>
+
+<Modal
+	danger
+	bind:open={frameworkModScriptsWarningOpen}
+	modalHeading="Mod contains scripts"
+	primaryButtonText="I'm sure"
+	secondaryButtonText="Cancel"
+	shouldSubmitOnEnter={false}
+	on:click:button--secondary={() => (frameworkModScriptsWarningOpen = false)}
+	on:click:button--primary={() => {
+		window.fs.copySync("./staging", "../Mods")
+
+		window.fs.removeSync("./staging")
+
+		window.location.reload()
+	}}
+>
+	<p>
+		This mod contains scripts; that means it effectively has full control over your PC whenever you apply your mods. Scripts can do cool things and make a lot of mods possible, but they can also
+		do bad things like installing malware on your computer. Make sure you trust whoever developed this mod, and wherever you downloaded it from. Are you sure you want to add this mod?
+	</p>
+</Modal>
+
+<Modal alert bind:open={displayZonedModsDialog} modalHeading="Incorrectly installed mod{zonedMods.length > 1 ? 's' : ''}" primaryButtonText="OK" shouldSubmitOnEnter={false} on:submit={() => (displayZonedModsDialog = false)}>
+	<p>
+		The mod{zonedMods.length > 1 ? "s" : ""}
+		{zonedMods.slice(0, -1).length ? zonedMods.slice(0, -1).join(", ") + " and " + zonedMods[zonedMods.length - 1] : zonedMods[0]}
+		{zonedMods.length > 1 ? "were" : "was"} installed by extracting the ZIP file directly to the Mods folder. That's not how you're meant to install mods; doing things this way could pose risks as
+		it bypasses the framework's checks for mod validity and safety. Instead, use the Add a Mod button to add any mods you want. This message won't be shown again for {zonedMods.length > 1 ? "these mods" : "this mod"}.
+	</p>
 </Modal>
 
 <style>
@@ -371,6 +445,10 @@
 	}
 
 	:global(.bx--modal-close) {
+		display: none;
+	}
+
+	:global(.bx--inline-notification__icon) {
 		display: none;
 	}
 </style>

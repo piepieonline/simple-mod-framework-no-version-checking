@@ -1,10 +1,16 @@
-import type { Config, Manifest } from "../../../src/types"
+import { OptionType, type Config, type Manifest } from "../../../src/types"
+import { compileExpression, useDotAccessOperatorAndOptionalChaining } from "filtrex"
+import { xxhash3 } from "hash-wasm"
 
+import Ajv from "ajv"
 import json5 from "json5"
+import manifestSchema from "$lib/manifest-schema.json"
 import memoize from "lodash.memoize"
 import merge from "lodash.mergewith"
 
-export const FrameworkVersion = "1.5.5"
+export const FrameworkVersion = "2.11.0"
+
+const validateManifest = new Ajv().compile(manifestSchema)
 
 export function getConfig() {
 	const config: Config = json5.parse(String(window.fs.readFileSync("../config.json", "utf8")))
@@ -155,8 +161,11 @@ export function sortMods() {
 							.filter(
 								(a) =>
 									config.modOptions[modManifest.id].includes(a.name) ||
-												config.modOptions[modManifest.id].includes(a.group + ":" + a.name) ||
-												(a.type == "requirement" && a.mods.every((b) => config.loadOrder.includes(b)))
+									config.modOptions[modManifest.id].includes(a.group + ":" + a.name) ||
+									(a.type == OptionType.conditional &&
+										compileExpression(a.condition, { customProp: useDotAccessOperatorAndOptionalChaining })({
+											config
+										}))
 							)
 							.map((a) => a.loadBefore)
 							.filter((a) => a)
@@ -169,8 +178,11 @@ export function sortMods() {
 							.filter(
 								(a) =>
 									config.modOptions[modManifest.id].includes(a.name) ||
-												config.modOptions[modManifest.id].includes(a.group + ":" + a.name) ||
-												(a.type == "requirement" && a.mods.every((b) => config.loadOrder.includes(b)))
+									config.modOptions[modManifest.id].includes(a.group + ":" + a.name) ||
+									(a.type == OptionType.conditional &&
+										compileExpression(a.condition, { customProp: useDotAccessOperatorAndOptionalChaining })({
+											config
+										}))
 							)
 							.map((a) => a.loadAfter)
 							.filter((a) => a)
@@ -223,12 +235,11 @@ export function sortMods() {
 
 export function alterModManifest(modID: string, data: Partial<Manifest>) {
 	const manifest = getManifestFromModID(modID)
-	merge(manifest, data,
-		(orig, src) => {
-			if (Array.isArray(orig)) {
-				return src
-			}
-		})
+	merge(manifest, data, (orig, src) => {
+		if (Array.isArray(orig)) {
+			return src
+		}
+	})
 	setModManifest(modID, manifest)
 }
 
@@ -239,12 +250,12 @@ export function setModManifest(modID: string, manifest: Manifest) {
 export const getModFolder = memoize(function (id: string) {
 	const folder = modIsFramework(id)
 		? window.fs
-			.readdirSync(window.path.join("..", "Mods"))
-			.find(
-				(a) =>
-					window.fs.existsSync(window.path.join("..", "Mods", a, "manifest.json")) &&
+				.readdirSync(window.path.join("..", "Mods"))
+				.find(
+					(a) =>
+						window.fs.existsSync(window.path.join("..", "Mods", a, "manifest.json")) &&
 						json5.parse(String(window.fs.readFileSync(window.path.join("..", "Mods", a, "manifest.json"), "utf8"))).id == id
-			) // Find mod by ID
+				) // Find mod by ID
 		: window.path.join("..", "Mods", id) // Mod is an RPKG mod, use folder name
 
 	if (!folder) {
@@ -260,8 +271,7 @@ export const modIsFramework = memoize(function (id: string) {
 			window.fs.existsSync(window.path.join("..", "Mods", id)) && // mod exists in folder
 			!window.fs.existsSync(window.path.join("..", "Mods", id, "manifest.json")) && // mod has no manifest
 			window
-				.klaw(window.path.join("..", "Mods", id))
-				.filter((a) => a.stats.size > 0)
+				.klaw(window.path.join("..", "Mods", id), { nodir: true })
 				.map((a) => a.path)
 				.some((a) => a.endsWith(".rpkg"))
 		) // mod contains RPKG files
@@ -286,3 +296,96 @@ export const getAllMods = memoize(function () {
 				: a.split(window.path.sep).pop()!
 		)
 })
+
+const modWarnings: {
+	title: string
+	subtitle: string
+	check: (fileToCheck: string) => Promise<boolean>
+	type: "error" | "warning" | "warning-suppressed" | "info"
+}[] = [
+	{
+		title: "Invalid manifest",
+		subtitle: `
+			The manifest of this mod is invalid.<br><br>
+			You should resolve this - this <b>will</b> cause issues.
+		`,
+		check: async (fileToCheck) => {
+			if (window.path.basename(fileToCheck) == "manifest.json") {
+				try {
+					const manifest = json5.parse(await window.fs.readFile(fileToCheck, "utf8"))
+					if (!manifest) return true
+					if (!validateManifest(manifest)) return true
+				} catch {
+					return true
+				}
+			}
+
+			return false
+		},
+		type: "error"
+	},
+	{
+		title: "Invalid JSON file",
+		subtitle: `
+			There is an invalid JSON file of a framework filetype present in the mod.<br><br>
+			You should resolve this - this <b>will</b> cause issues.
+		`,
+		check: async (fileToCheck) => {
+			if (
+				fileToCheck.endsWith("entity.json") ||
+				fileToCheck.endsWith("entity.patch.json") ||
+				fileToCheck.endsWith("repository.json") ||
+				fileToCheck.endsWith("unlockables.json") ||
+				fileToCheck.endsWith("JSON.patch.json") ||
+				fileToCheck.endsWith("contract.json")
+			) {
+				try {
+					if (!(await window.fs.readJSON(fileToCheck))) return true
+				} catch {
+					return true
+				}
+			}
+
+			return false
+		},
+		type: "error"
+	}
+]
+
+let startedGettingModWarnings = false
+
+export async function getAllModWarnings() {
+	if (!startedGettingModWarnings && !window.fs.existsSync("./warnings.json")) {
+		startedGettingModWarnings = true
+
+		const allWarnings = []
+
+		for (const mod of getAllMods().filter((a) => modIsFramework(a))) {
+			const fileWarnings: Record<string, any[]> = {}
+
+			const filesToCheck: string[][] = []
+
+			for (const file of window.klaw(getModFolder(mod), { nodir: true }).map((a) => a.path)) {
+				fileWarnings[file] = []
+				for (const warning of modWarnings) {
+					if (await warning.check(file)) {
+						fileWarnings[file].push({
+							title: warning.title,
+							subtitle: warning.subtitle,
+							trace: file,
+							type: warning.type
+						})
+					}
+				}
+			}
+
+			allWarnings.push([mod, Object.values(fileWarnings)])
+		}
+
+		await window.fs.writeJSON("./warnings.json", Object.fromEntries(await Promise.all(allWarnings)))
+	} else if (startedGettingModWarnings) {
+		while (!window.fs.existsSync("./warnings.json")) await new Promise((r) => setTimeout(r, 1000))
+	}
+
+	return window.fs.readJSONSync("./warnings.json")
+}

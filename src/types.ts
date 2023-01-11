@@ -2,7 +2,11 @@ type RuntimeID = string
 type LocalisationID = string
 type ModID = string
 
-type Platform = "steam" | "epic" | "microsoft"
+export enum Platform {
+	steam = "steam",
+	epic = "epic",
+	microsoft = "microsoft"
+}
 
 export enum Language {
 	english = "english",
@@ -13,7 +17,13 @@ export enum Language {
 	russian = "russian",
 	chineseSimplified = "chineseSimplified",
 	chineseTraditional = "chineseTraditional",
-	japanese = "japanese",
+	japanese = "japanese"
+}
+
+export enum OptionType {
+	checkbox = "checkbox",
+	select = "select",
+	conditional = "conditional"
 }
 
 export type Manifest = {
@@ -30,7 +40,7 @@ export type Manifest = {
 	options?: ((
 		| {
 				name: string
-				type: "checkbox"
+				type: OptionType.checkbox
 
 				enabledByDefault?: boolean
 
@@ -39,7 +49,7 @@ export type Manifest = {
 		  }
 		| {
 				name: string
-				type: "select"
+				type: OptionType.select
 
 				group: string
 				enabledByDefault?: boolean
@@ -49,19 +59,19 @@ export type Manifest = {
 		  }
 		| {
 				name: string
-				type: "requirement"
-				mods: string[]
+				type: OptionType.conditional
+				condition: string
 		  }
 	) &
 		ManifestOptionData)[]
 } & ManifestOptionData
 
 export interface ManifestOptionData {
-	/** A folder with content files that will be crawled and automatically deployed. */
-	contentFolder?: string
+	/** Folders with content files that will be crawled and automatically deployed. */
+	contentFolders?: string[]
 
-	/** A folder with blobs that will be crawled and automatically deployed. */
-	blobsFolder?: string
+	/** Folders with blobs that will be crawled and automatically deployed. */
+	blobsFolders?: string[]
 
 	/** Localisation for each supported language. */
 	localisation?: {
@@ -103,19 +113,13 @@ export interface ManifestOptionData {
 	/** Commands to add to thumbs.dat after [Hitman5]. */
 	thumbs?: string[]
 
-	/** RPKG files to add to Runtime before the framework patch.
-	 * Use of this is discouraged. */
-	runtimePackages?: {
-		chunk: number
-		path: string
-	}[]
-
 	/** RuntimeIDs that will be ported to chunk0 or to a provided chunk. */
 	dependencies?: (
 		| string
 		| {
 				runtimeID: string
-				toChunk: string
+				toChunk?: number
+				portFromChunk1?: boolean
 		  }
 	)[]
 
@@ -146,6 +150,9 @@ export interface DeployInstruction {
 	/** Unique identifier. Should be the mod's ID. */
 	id: string
 
+	/** Mod's friendly name. Should be the mod's name as defined in the manifest. */
+	name: string
+
 	/** Cache folder. Should be the mod's folder name in Mods. */
 	cacheFolder: string
 
@@ -167,10 +174,6 @@ export interface DeployInstruction {
 
 		/** Commands to add to thumbs.dat after [Hitman5]. */
 		thumbs: ManifestOptionData["thumbs"]
-
-		/** RPKG patch files to add to Runtime before the framework patch.
-		 * Use of this is discouraged. */
-		runtimePackages: ManifestOptionData["runtimePackages"]
 
 		/** RuntimeIDs that will be ported to chunk0 or to a provided chunk. */
 		dependencies: ManifestOptionData["dependencies"]
@@ -201,7 +204,7 @@ export interface DeployInstruction {
 				order?: string
 
 				/** The chunk this content will be deployed to. */
-				chunk: string
+				chunk: number
 
 				/** The path to the content. This will never be mutated; it is safe to pass the real path in Mods.
 				 * If you are going to create a file and pass it to the framework, you should instead use a virtual source and pass a JS Blob. */
@@ -224,7 +227,7 @@ export interface DeployInstruction {
 				identifier: string
 
 				/** The chunk this content will be deployed to. */
-				chunk: string
+				chunk: number
 
 				/** The content, in JS Blob form. This will be written to disk or parsed in memory, depending on the content's type. */
 				content: Blob
@@ -250,8 +253,11 @@ export interface DeployInstruction {
 					/** sfx.wem */
 					wwevElement?: number
 
-					/** Raw file */
+					/** Raw file or delta patch */
 					runtimeID?: string
+
+					/** Raw file or delta patch */
+					fileType?: string
 				}
 		  }
 	)[]
@@ -342,6 +348,14 @@ export interface ModScript extends NodeModule {
 
 	/** A function that runs immediately after the mod deploy ends - the deploy instruction has been processed. */
 	afterDeploy(context: ModContext, modAPI: ModAPI): Promise<void>
+
+	/** You must provide a caching policy for this script. It's used to ensure that changes in how your mod scripts function are properly accounted for when caching other files. Scripts themselves are never cached. */
+	cachingPolicy: CachePolicy
+}
+
+export interface CachePolicy {
+	/** A list of hashes that your script may affect, alter, create or write in any way. */
+	affected: string[]
 }
 
 export interface ModContext {
@@ -366,7 +380,7 @@ export interface ModAPI {
 	rpkg: {
 		/** Call an RPKG tool function and return its output. */
 		callRPKGFunction(func: string): Promise<string>
-	
+
 		/** Get the RPKG a given hash resides in, in "chunkXpatchY" format. */
 		getRPKGOfHash(hash: string): Promise<string>
 
@@ -379,21 +393,15 @@ export interface ModAPI {
 		/** Execute a shell command. */
 		execCommand(command: string): void
 
-		/** Copy a folder from the cache. mod should be instruction.cacheFolder; cachePath and outputPath can be anything, but should match the associated copyToCache. */
-		copyFromCache(mod: string, cachePath: string, outputPath: string): Promise<boolean>
-	
-		/** Copy a folder to the cache. mod should be instruction.cacheFolder; originalPath and cachePath can be anything, but should match the associated copyFromCache. */
-		copyToCache(mod: string, originalPath: string, cachePath: string): Promise<boolean>
-	
 		/** Get the QuickEntity module for a given QuickEntity version. */
 		getQuickEntityFromVersion(version: string): any
-	
+
 		/** Get the QuickEntity module for a given QuickEntity patch version. */
 		getQuickEntityFromPatchVersion(version: string): any
-	
+
 		/** Copy a file to temp if it has already been staged by a mod, or extract it if it has not. stagingChunk defaults to chunk0. */
 		extractOrCopyToTemp(rpkgOfFile: string, file: string, type: string, stagingChunk: string | undefined): Promise<void>
-	
+
 		/** Flip the hexadecimal bytes of a string. */
 		hexflip(input: string): string
 	}
@@ -401,20 +409,20 @@ export interface ModAPI {
 	/** Functions for logging to the console. */
 	logger: {
 		/** Print a message at the verbose log level. This is not shown by default to a user, but is useful for debugging. */
-		verbose(message: string): void
+		verbose(message: string): Promise<void>
 
 		/** Print a message at the debug log level. */
-		debug(message: string): void
+		debug(message: string): Promise<void>
 
 		/** Print a message at the info log level. */
-		info(message: string): void
+		info(message: string): Promise<void>
 
 		/** Print a message at the warn log level. */
-		warn(message: string): void
+		warn(message: string): Promise<void>
 
 		/** Print a message at the error log level.
-		 * This will by default exit the program. It is recommended to leave exitAfter on unless you plan to exit yourself.
+		 * This will by default exit the program. It is recommended to leave exitAfter enabled (which it is by default); exitAfter is only used internally for certain errors.
 		 * If there is an error that is not critical (not deserving of exiting the program), use warn instead. */
-		error(message: string, exitAfter: boolean): void
+		error(message: string, exitAfter?: boolean): Promise<void>
 	}
 }

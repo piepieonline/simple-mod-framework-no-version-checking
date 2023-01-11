@@ -5,7 +5,7 @@ import path from "path"
 
 require("clarify")
 
-const config = json5.parse(String(fs.readFileSync(path.join(process.cwd(), "config.json"))))
+const config = json5.parse(fs.readFileSync(path.join(process.cwd(), "config.json"), "utf8"))
 
 class RPKGInstance {
 	rpkgProcess: child_process.ChildProcessWithoutNullStreams
@@ -16,12 +16,15 @@ class RPKGInstance {
 	initialised: boolean
 	ready: boolean
 
+	shouldExit: boolean
+
 	constructor() {
 		this.rpkgProcess = child_process.spawn(path.join(process.cwd(), "Third-Party", "rpkg-cli"), ["-i"])
 		this.output = ""
 		this.previousOutput = ""
 		this.initialised = false
 		this.ready = false
+		this.shouldExit = false
 
 		this.rpkgProcess.stdout.on("data", (data) => {
 			this.output += String(data)
@@ -38,6 +41,19 @@ class RPKGInstance {
 				this.previousOutput = this.output
 				this.output = ""
 				this.ready = true
+			}
+		})
+
+		this.rpkgProcess.on("close", () => {
+			if (!this.shouldExit) {
+				console.error("Fatal error!")
+				console.error("RPKG process exited unexpectedly with output:")
+
+				for (let line of this.output.split("\n")) {
+					console.log(line)
+				}
+
+				setTimeout(() => process.exit(1), 2000)
 			}
 		})
 	}
@@ -58,7 +74,7 @@ class RPKGInstance {
 
 	async getRPKGOfHash(hash: string): Promise<string> {
 		const result = [
-			...(await this.callFunction("-hash_probe \"" + path.resolve(process.cwd(), config.runtimePath) + "\" -filter \"" + hash + "\"")).matchAll(
+			...(await this.callFunction('-hash_probe "' + path.resolve(process.cwd(), config.runtimePath) + '" -filter "' + hash + '"')).matchAll(
 				/is in RPKG file: (chunk[0-9]*(?:patch[1-9])?)\.rpkg/g
 			)
 		]
@@ -66,6 +82,7 @@ class RPKGInstance {
 	}
 
 	exit() {
+		this.shouldExit = true
 		this.rpkgProcess.kill()
 	}
 }

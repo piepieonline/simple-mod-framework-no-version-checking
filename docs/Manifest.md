@@ -8,14 +8,14 @@ Each mod contains a manifest. Manifests have the following format:
 	"description": "It is a mod",
 	"authors": ["Atampy26", "No one else"],
 	"version": "1.0.0", // The mod's version, used to compare against the linked JSON - make sure to use semantic versioning (Major.Minor.Patch)
-	"frameworkVersion": "1.5.5", // The framework version the mod is designed for
+	"frameworkVersion": "2.11.0", // The framework version the mod is designed for
 
 	/* -------------------------------------- Optional data -------------------------------------- */
 	"updateCheck": "https://hitman-resources.netlify.app/framework/updates/exampleMod.json", // A JSON (see Mod Updates) that will be checked for updates (MUST BE HTTPS) - contact Atampy26 for hosting on hitman-resources.netlify.app
 
 	/* ------- This data can be used in mod options as well as on the top level (optional) ------- */
-	"contentFolder": "content", // Folder next to the manifest to use for the mod content
-	"blobsFolder": "blobs", // Folder next to the manifest to use for blobs (new/edited existing JSON and GFXI files)
+	"contentFolders": ["content"], // Folders next to the manifest to use for the mod content
+	"blobsFolders": ["blobs"], // Folders next to the manifest to use for blobs (new/edited existing JSON and GFXI files)
 	"localisation": {
 		"english": {
 			"UI_THEBESTMOD": "The Best Mod" // You can use UI_THEBESTMOD elsewhere
@@ -55,33 +55,27 @@ Each mod contains a manifest. Manifests have the following format:
 	},
 	"packagedefinition": [
 		{
-			// For new chunks
+			// For new chunks; not recommended to use
 			"type": "partition",
-			"name": "myNewChunk28",
+			"name": "myNewChunk29",
 			"parent": "season3",
 			"partitionType": "standard"
 		},
 		{
 			// For new bricks/entities
 			"type": "entity",
-			"partition": "myNewChunk28",
-			"path": "[assembly:/_pro/myBricks/myNewChunk28Map.entity].entitytemplate"
+			"partition": "myNewChunk29",
+			"path": "[assembly:/_pro/myBricks/myNewChunk29Map.entity].entitytemplate"
 		}
 	],
 	"thumbs": ["ConsoleCmd AAAAAAAAAA"], // Thumbs.dat commands to place after [Hitman5]
-	"runtimePackages": [
-		// RPKG files to place (and automatically name) in Runtime
-		{
-			"chunk": 0, // This for example would become chunk0patch205 if no other mods added RPKGs (numbers are incremented automatically)
-			"path": "portedhashes.rpkg"
-		}
-	],
 	"dependencies": [
 		// Runtime IDs of files to extract the dependencies of and place in chunk0 (automatic porting of dependencies) OR objects containing a runtime ID and the chunk to place the dependencies in
 		"00123456789ABCDE",
 		{
 			"runtimeID": "00AAAAAAAAAAAAAA",
-			"toChunk": "chunk1"
+			"toChunk": 1, // Which chunk to place the dependencies in; optional, defaults to 0
+			"portFromChunk1": true // Whether to also port dependencies from chunk1 (which is usually not necessary); optional, defaults to false
 		}
 	],
 	"supportedPlatforms": [
@@ -101,6 +95,7 @@ Each mod contains a manifest. Manifests have the following format:
 		"Atampy26.RequiredMod", // You'll generally want to load after a required mod
 		"Atampy26.OtherModThatThisModUses"
 	],
+	"scripts": ["mod.ts", "helpers.ts", "blabla.ts"], // Relative paths to TypeScript files that can alter deployment of the mod - see Scripts for more information
 
 	"options": [
 		// Settings for the mod that can be enabled/disabled in the GUI - Can be omitted if the mod doesn't need to provide settings
@@ -110,7 +105,7 @@ Each mod contains a manifest. Manifests have the following format:
 			"image": "additionalcontent.png", // Not required, will display an image to the right of the settings window with the image, option name and tooltip when hovered in the GUI
 			"type": "checkbox", // Checkbox type means a checkbox to use the variation or not
 			"enabledByDefault": false, // Default value of the mod option when the user first enables the mod - if it is enabled by default but requires a non-present mod it will be forcibly disabled
-			"contentFolder": "additional content", // Options can include all fields in the above section, and do not override them (so both content folders are used)
+			"contentFolders": ["additional content"], // Options can include all fields in the above section, and do not override them (so both content folders are used)
 			"requirements": ["Atampy26.AnotherRequiredModButOnlyIfVariationEnabled"]
 		},
 		{
@@ -162,9 +157,9 @@ Each mod contains a manifest. Manifests have the following format:
 		},
 		{
 			"name": "Use epic content",
-			"type": "requirement", // This variation will be active if every mod in mods is enabled and inactive otherwise - it will not be shown in the GUI
-			"mods": ["Atampy26.SomeOtherMod"],
-			"contentFolder": "epicContent"
+			"type": "conditional", // This variation will be active if its condition returns true and inactive otherwise - it will not be shown in the GUI
+			"condition": "\"Atampy26.SomeOtherMod\" in config.loadOrder", // The condition is passed the framework's config; you can check the syntax at https://github.com/m93a/filtrex#expressions
+			"contentFolders": ["epicContent"]
 		}
 	]
 }
