@@ -1982,7 +1982,7 @@ export default async function deploy(
 		
 		for (const patch of thumbs) {
 			// Manifest patches
-			thumbsContent.replace(/\[Hitman5\]\n/gi, "[Hitman5]\n" + patch + "\n")
+			thumbsContent.replace(/\[Hitman5\]\r?\n/gi, "[Hitman5]\n" + patch + "\n")
 			await logger.info(patch)
 		}
 
