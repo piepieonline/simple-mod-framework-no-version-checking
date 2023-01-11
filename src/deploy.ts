@@ -1978,9 +1978,12 @@ export default async function deploy(
 			thumbsContent = thumbsContent.replace("Boot.entity", "MainMenu.entity")
 		}
 
+		await logger.info(thumbs)
+		
 		for (const patch of thumbs) {
 			// Manifest patches
 			thumbsContent.replace(/\[Hitman5\]\n/gi, "[Hitman5]\n" + patch + "\n")
+			await logger.info(patch)
 		}
 
 		fs.writeFileSync(path.join(process.cwd(), "temp", "thumbs.dat.decrypted"), thumbsContent)
